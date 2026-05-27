@@ -92,6 +92,17 @@ AIWorkerMoveLController::AIWorkerMoveLController()
     joint_states_topic_, 10,
     std::bind(&AIWorkerMoveLController::jointStateCallback, this, std::placeholders::_1));
 
+  // MoveJ / Home subscribers
+  left_movej_sub_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(
+    "/input_movej_l", 10,
+    std::bind(&AIWorkerMoveLController::leftMoveJCallback, this, std::placeholders::_1));
+  right_movej_sub_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(
+    "/input_movej_r", 10,
+    std::bind(&AIWorkerMoveLController::rightMoveJCallback, this, std::placeholders::_1));
+  home_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+    "/input_home", 10,
+    std::bind(&AIWorkerMoveLController::inputHomeCallback, this, std::placeholders::_1));
+
   arm_r_pub_ = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(right_traj_topic_, 10);
   arm_l_pub_ = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(left_traj_topic_, 10);
   lift_pub_ = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(lift_topic_, 10);
@@ -122,6 +133,7 @@ AIWorkerMoveLController::AIWorkerMoveLController()
     q_.setZero(dof);
     qdot_.setZero(dof);
     q_desired_.setZero(dof);
+    q_movej_target_.setZero(dof);
   } catch (const std::exception & e) {
     RCLCPP_FATAL(this->get_logger(), "Failed to initialize motion controller: %s", e.what());
     rclcpp::shutdown();
@@ -280,6 +292,101 @@ void AIWorkerMoveLController::leftMoveLCallback(const robotis_interfaces::msg::M
   left_movel_trajectory_active_ = left_active_motion_duration_ > -1.0;
 }
 
+void AIWorkerMoveLController::leftMoveJCallback(
+  const trajectory_msgs::msg::JointTrajectory::SharedPtr msg)
+{
+  if (!msg || msg->points.empty() || !q_desired_initialized_) {
+    return;
+  }
+
+  if (!movej_active_) {
+    q_movej_start_ = q_desired_;
+    q_movej_target_ = q_desired_;
+  }
+  for (size_t i = 0; i < msg->joint_names.size(); ++i) {
+    auto it = model_joint_index_map_.find(msg->joint_names[i]);
+    if (it != model_joint_index_map_.end() && i < msg->points[0].positions.size()) {
+      q_movej_target_[it->second] = msg->points[0].positions[i];
+    }
+  }
+  movej_duration_ = rclcpp::Duration(msg->points[0].time_from_start).seconds();
+  if (movej_duration_ <= 0.0) {
+    movej_duration_ = 4.0;
+  }
+  movej_start_time_ = this->now();
+  movej_active_ = true;
+  RCLCPP_INFO(this->get_logger(), "MoveJ left received, duration=%.2f", movej_duration_);
+}
+
+void AIWorkerMoveLController::rightMoveJCallback(
+  const trajectory_msgs::msg::JointTrajectory::SharedPtr msg)
+{
+  if (!msg || msg->points.empty() || !q_desired_initialized_) {
+    return;
+  }
+
+  if (!movej_active_) {
+    q_movej_start_ = q_desired_;
+    q_movej_target_ = q_desired_;
+  }
+  for (size_t i = 0; i < msg->joint_names.size(); ++i) {
+    auto it = model_joint_index_map_.find(msg->joint_names[i]);
+    if (it != model_joint_index_map_.end() && i < msg->points[0].positions.size()) {
+      q_movej_target_[it->second] = msg->points[0].positions[i];
+    }
+  }
+  movej_duration_ = rclcpp::Duration(msg->points[0].time_from_start).seconds();
+  if (movej_duration_ <= 0.0) {
+    movej_duration_ = 4.0;
+  }
+  movej_start_time_ = this->now();
+  movej_active_ = true;
+  RCLCPP_INFO(this->get_logger(), "MoveJ right received, duration=%.2f", movej_duration_);
+}
+
+void AIWorkerMoveLController::inputHomeCallback(
+  const std_msgs::msg::Bool::SharedPtr msg)
+{
+  if (!msg || !msg->data || !q_desired_initialized_) {
+    return;
+  }
+
+  RCLCPP_INFO(this->get_logger(), "HOME TRIGGER RECEIVED");
+
+  q_movej_start_ = q_desired_;
+  q_movej_target_ = q_desired_;
+
+  const std::vector<std::string> left_names = {
+    "arm_l_joint1", "arm_l_joint2", "arm_l_joint3", "arm_l_joint4",
+    "arm_l_joint5", "arm_l_joint6", "arm_l_joint7"
+  };
+  const std::vector<double> left_home = {0.2847, 0.2847, -0.6768, -0.8061, 0.7736, 0.3265, 0.2502};
+  for (size_t i = 0; i < left_names.size(); ++i) {
+    auto it = model_joint_index_map_.find(left_names[i]);
+    if (it != model_joint_index_map_.end()) {
+      q_movej_target_[it->second] = left_home[i];
+    }
+  }
+
+  const std::vector<std::string> right_names = {
+    "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
+    "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
+  };
+  const std::vector<double> right_home = {
+    0.2847, -0.2847, 0.6769, -0.8062, -0.7736, 0.3265, -0.2502
+  };
+  for (size_t i = 0; i < right_names.size(); ++i) {
+    auto it = model_joint_index_map_.find(right_names[i]);
+    if (it != model_joint_index_map_.end()) {
+      q_movej_target_[it->second] = right_home[i];
+    }
+  }
+
+  movej_duration_ = 5.0;
+  movej_start_time_ = this->now();
+  movej_active_ = true;
+}
+
 Eigen::Affine3d AIWorkerMoveLController::poseMsgToEigen(
   const geometry_msgs::msg::PoseStamped & pose_msg) const
 {
@@ -330,6 +437,27 @@ void AIWorkerMoveLController::controlLoopCallback()
       RCLCPP_WARN(
         this->get_logger(),
         "Joint states timed out. Holding commands until fresh feedback is received.");
+    }
+    return;
+  }
+
+  // MoveJ bypass: start → target 보간 후 publish (movej_duration_ 동안 천천히 이동)
+  if (movej_active_) {
+    const double elapsed = (this->now() - movej_start_time_).seconds();
+    const double alpha = std::min(1.0, elapsed / movej_duration_);
+    const Eigen::VectorXd q_interp = q_movej_start_ + alpha * (q_movej_target_ - q_movej_start_);
+    publishTrajectory(q_interp);
+    if (elapsed >= movej_duration_) {
+      movej_active_ = false;
+      q_desired_ = q_movej_target_;
+      kinematics_solver_->updateState(q_desired_, qdot_);
+      right_movel_goal_pose_ = kinematics_solver_->getPose(r_gripper_name_);
+      left_movel_goal_pose_ = kinematics_solver_->getPose(l_gripper_name_);
+      right_movel_start_pose_ = right_movel_goal_pose_;
+      left_movel_start_pose_ = left_movel_goal_pose_;
+      right_movel_trajectory_active_ = false;
+      left_movel_trajectory_active_ = false;
+      RCLCPP_INFO(this->get_logger(), "MoveJ completed, holding at target.");
     }
     return;
   }

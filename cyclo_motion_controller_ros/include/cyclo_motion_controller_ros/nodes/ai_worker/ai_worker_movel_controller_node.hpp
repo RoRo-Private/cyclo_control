@@ -28,6 +28,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <robotis_interfaces/msg/move_l.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 
@@ -82,6 +83,9 @@ private:
   rclcpp::Subscription<robotis_interfaces::msg::MoveL>::SharedPtr right_movel_sub_;
   rclcpp::Subscription<robotis_interfaces::msg::MoveL>::SharedPtr left_movel_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
+  rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr left_movej_sub_;
+  rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr right_movej_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr home_sub_;
 
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr arm_r_pub_;
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr arm_l_pub_;
@@ -131,9 +135,19 @@ private:
   std::vector<std::string> model_joint_names_;
   std::unordered_map<std::string, int> model_joint_index_map_;
 
+  // MoveJ / Home state
+  bool movej_active_ = false;
+  Eigen::VectorXd q_movej_start_;
+  Eigen::VectorXd q_movej_target_;
+  rclcpp::Time movej_start_time_;
+  double movej_duration_ = 0.0;
+
   void rightMoveLCallback(const robotis_interfaces::msg::MoveL::SharedPtr msg);
   void leftMoveLCallback(const robotis_interfaces::msg::MoveL::SharedPtr msg);
   void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
+  void leftMoveJCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
+  void rightMoveJCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
+  void inputHomeCallback(const std_msgs::msg::Bool::SharedPtr msg);
   void controlLoopCallback();
 
   void initializeJointConfig();
