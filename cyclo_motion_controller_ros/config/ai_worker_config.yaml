@@ -19,9 +19,9 @@ ai_worker_movel_controller:
     joint_states_topic: "/joint_states"
     right_movel_topic: "/r_goal_move"
     left_movel_topic: "/l_goal_move"
-    right_traj_topic: "/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"
-    left_traj_topic: "/leader/joint_trajectory_command_broadcaster_left/joint_trajectory"
-    lift_topic: "/leader/joystick_controller_right/joint_trajectory"
+    right_traj_topic: "/relay/arm_r/joint_trajectory"
+    left_traj_topic: "/relay/arm_l/joint_trajectory"
+    lift_topic: "/relay/lift/joint_trajectory"
 
     lift_vel_bound: 0.0
 
