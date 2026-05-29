@@ -86,6 +86,7 @@ private:
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr left_movej_sub_;
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr right_movej_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr home_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr arm_prepare_sub_;
 
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr arm_r_pub_;
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr arm_l_pub_;
@@ -117,6 +118,7 @@ private:
   bool right_movel_trajectory_active_;
   bool left_movel_trajectory_active_;
   bool idle_hold_published_ = false;
+  bool require_new_movel_goal_ = false;
   bool joint_state_timeout_active_ = false;
 
   rclcpp::Time right_motion_start_time_;
@@ -149,6 +151,7 @@ private:
   void leftMoveJCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
   void rightMoveJCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
   void inputHomeCallback(const std_msgs::msg::Bool::SharedPtr msg);
+  void armPrepareCallback(const std_msgs::msg::Bool::SharedPtr msg);
   void controlLoopCallback();
 
   void initializeJointConfig();
@@ -156,7 +159,9 @@ private:
   trajectory_msgs::msg::JointTrajectory createArmTrajectoryMsg(
     const std::vector<std::string> & arm_joint_names,
     const Eigen::VectorXd & positions,
-    const std::vector<int> & arm_indices) const;
+    const std::vector<int> & arm_indices,
+    const std::string & gripper_joint_name,
+    double gripper_position) const;
   trajectory_msgs::msg::JointTrajectory createLiftTrajectoryMsg(
     std::string lift_joint_name,
     const double position) const;

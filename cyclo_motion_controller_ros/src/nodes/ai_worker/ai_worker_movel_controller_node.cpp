@@ -102,6 +102,9 @@ AIWorkerMoveLController::AIWorkerMoveLController()
   home_sub_ = this->create_subscription<std_msgs::msg::Bool>(
     "/input_home", 10,
     std::bind(&AIWorkerMoveLController::inputHomeCallback, this, std::placeholders::_1));
+  arm_prepare_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+    "/arm_prepare_request", 10,
+    std::bind(&AIWorkerMoveLController::armPrepareCallback, this, std::placeholders::_1));
 
   arm_r_pub_ = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(right_traj_topic_, 10);
   arm_l_pub_ = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(left_traj_topic_, 10);
@@ -274,6 +277,7 @@ void AIWorkerMoveLController::rightMoveLCallback(
   right_movel_target_initialized_ = true;
   right_movel_trajectory_active_ = right_active_motion_duration_ > -1.0;
   idle_hold_published_ = false;
+  require_new_movel_goal_ = false;
 }
 
 void AIWorkerMoveLController::leftMoveLCallback(const robotis_interfaces::msg::MoveL::SharedPtr msg)
@@ -294,6 +298,7 @@ void AIWorkerMoveLController::leftMoveLCallback(const robotis_interfaces::msg::M
   left_movel_target_initialized_ = true;
   left_movel_trajectory_active_ = left_active_motion_duration_ > -1.0;
   idle_hold_published_ = false;
+  require_new_movel_goal_ = false;
 }
 
 void AIWorkerMoveLController::leftMoveJCallback(
@@ -308,6 +313,12 @@ void AIWorkerMoveLController::leftMoveJCallback(
     q_movej_target_ = q_desired_;
   }
   for (size_t i = 0; i < msg->joint_names.size(); ++i) {
+    if (msg->joint_names[i] == left_gripper_joint_name_ &&
+      i < msg->points[0].positions.size())
+    {
+      left_gripper_position_ = msg->points[0].positions[i];
+      continue;
+    }
     auto it = model_joint_index_map_.find(msg->joint_names[i]);
     if (it != model_joint_index_map_.end() && i < msg->points[0].positions.size()) {
       q_movej_target_[it->second] = msg->points[0].positions[i];
@@ -320,6 +331,7 @@ void AIWorkerMoveLController::leftMoveJCallback(
   movej_start_time_ = this->now();
   movej_active_ = true;
   idle_hold_published_ = false;
+  require_new_movel_goal_ = true;
   RCLCPP_INFO(this->get_logger(), "MoveJ left received, duration=%.2f", movej_duration_);
 }
 
@@ -335,6 +347,12 @@ void AIWorkerMoveLController::rightMoveJCallback(
     q_movej_target_ = q_desired_;
   }
   for (size_t i = 0; i < msg->joint_names.size(); ++i) {
+    if (msg->joint_names[i] == right_gripper_joint_name_ &&
+      i < msg->points[0].positions.size())
+    {
+      right_gripper_position_ = msg->points[0].positions[i];
+      continue;
+    }
     auto it = model_joint_index_map_.find(msg->joint_names[i]);
     if (it != model_joint_index_map_.end() && i < msg->points[0].positions.size()) {
       q_movej_target_[it->second] = msg->points[0].positions[i];
@@ -347,6 +365,7 @@ void AIWorkerMoveLController::rightMoveJCallback(
   movej_start_time_ = this->now();
   movej_active_ = true;
   idle_hold_published_ = false;
+  require_new_movel_goal_ = true;
   RCLCPP_INFO(this->get_logger(), "MoveJ right received, duration=%.2f", movej_duration_);
 }
 
@@ -392,6 +411,50 @@ void AIWorkerMoveLController::inputHomeCallback(
   movej_start_time_ = this->now();
   movej_active_ = true;
   idle_hold_published_ = false;
+  require_new_movel_goal_ = true;
+}
+
+void AIWorkerMoveLController::armPrepareCallback(
+  const std_msgs::msg::Bool::SharedPtr msg)
+{
+  if (!msg || !msg->data || !q_desired_initialized_) {
+    return;
+  }
+
+  RCLCPP_INFO(this->get_logger(), "ARM PREPARE TRIGGER RECEIVED");
+
+  q_movej_start_ = q_desired_;
+  q_movej_target_ = q_desired_;
+
+  const std::vector<std::string> left_names = {
+    "arm_l_joint1", "arm_l_joint2", "arm_l_joint3", "arm_l_joint4",
+    "arm_l_joint5", "arm_l_joint6", "arm_l_joint7"
+  };
+  const std::vector<double> left_ready = {0.15, 0.30, -0.25, -1.65, 0.35, 0.3265, 0.2502};
+  for (size_t i = 0; i < left_names.size(); ++i) {
+    auto it = model_joint_index_map_.find(left_names[i]);
+    if (it != model_joint_index_map_.end()) {
+      q_movej_target_[it->second] = left_ready[i];
+    }
+  }
+
+  const std::vector<std::string> right_names = {
+    "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
+    "arm_r_joint5", "arm_r_joint6", "arm_r_joint7"
+  };
+  const std::vector<double> right_ready = {0.15, -0.30, 0.25, -1.65, -0.35, 0.3265, -0.2502};
+  for (size_t i = 0; i < right_names.size(); ++i) {
+    auto it = model_joint_index_map_.find(right_names[i]);
+    if (it != model_joint_index_map_.end()) {
+      q_movej_target_[it->second] = right_ready[i];
+    }
+  }
+
+  movej_duration_ = 7.0;
+  movej_start_time_ = this->now();
+  movej_active_ = true;
+  idle_hold_published_ = false;
+  require_new_movel_goal_ = true;
 }
 
 Eigen::Affine3d AIWorkerMoveLController::poseMsgToEigen(
@@ -479,6 +542,17 @@ void AIWorkerMoveLController::controlLoopCallback()
     right_gripper_pose_ = kinematics_solver_->getPose(r_gripper_name_);
     left_gripper_pose_ = kinematics_solver_->getPose(l_gripper_name_);
     publishGripperPose(right_gripper_pose_, left_gripper_pose_);
+
+    if (require_new_movel_goal_) {
+      if (!idle_hold_published_) {
+        publishTrajectory(q_desired_);
+        idle_hold_published_ = true;
+        RCLCPP_INFO(
+          this->get_logger(),
+          "Holding after MoveJ. Waiting for a new MoveL goal.");
+      }
+      return;
+    }
 
     if (!right_movel_target_initialized_ || !left_movel_target_initialized_) {
       return;
@@ -674,12 +748,14 @@ void AIWorkerMoveLController::publishTrajectory(const Eigen::VectorXd & q_desire
 
   if (!left_arm_indices.empty()) {
     arm_l_pub_->publish(createArmTrajectoryMsg(
-      left_arm_joints_, q_desired, left_arm_indices));
+      left_arm_joints_, q_desired, left_arm_indices,
+      left_gripper_joint_name_, left_gripper_position_));
   }
 
   if (!right_arm_indices.empty()) {
     arm_r_pub_->publish(createArmTrajectoryMsg(
-      right_arm_joints_, q_desired, right_arm_indices));
+      right_arm_joints_, q_desired, right_arm_indices,
+      right_gripper_joint_name_, right_gripper_position_));
   }
 
   if (lift_joint_index_ >= 0 && !lift_joint_.empty() && lift_vel_bound_ != 0.0 &&
@@ -692,11 +768,14 @@ void AIWorkerMoveLController::publishTrajectory(const Eigen::VectorXd & q_desire
 trajectory_msgs::msg::JointTrajectory AIWorkerMoveLController::createArmTrajectoryMsg(
   const std::vector<std::string> & arm_joint_names,
   const Eigen::VectorXd & positions,
-  const std::vector<int> & arm_indices) const
+  const std::vector<int> & arm_indices,
+  const std::string & gripper_joint_name,
+  double gripper_position) const
 {
   trajectory_msgs::msg::JointTrajectory traj_msg;
   traj_msg.header.frame_id = "";
   traj_msg.joint_names = arm_joint_names;
+  traj_msg.joint_names.push_back(gripper_joint_name);
 
   trajectory_msgs::msg::JointTrajectoryPoint point;
   point.time_from_start = rclcpp::Duration::from_seconds(trajectory_time_);
@@ -705,6 +784,7 @@ trajectory_msgs::msg::JointTrajectory AIWorkerMoveLController::createArmTrajecto
       point.positions.push_back(positions[idx]);
     }
   }
+  point.positions.push_back(gripper_position);
   traj_msg.points.push_back(point);
   return traj_msg;
 }
