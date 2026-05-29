@@ -348,6 +348,7 @@ void AIWorkerMoveLController::leftMoveJCallback(
   }
   movej_start_time_ = this->now();
   movej_active_ = true;
+  movej_goal_published_ = false;
   idle_hold_published_ = false;
   require_new_movel_goal_ = true;
   RCLCPP_INFO(this->get_logger(), "MoveJ left received, duration=%.2f", movej_duration_);
@@ -382,6 +383,7 @@ void AIWorkerMoveLController::rightMoveJCallback(
   }
   movej_start_time_ = this->now();
   movej_active_ = true;
+  movej_goal_published_ = false;
   idle_hold_published_ = false;
   require_new_movel_goal_ = true;
   RCLCPP_INFO(this->get_logger(), "MoveJ right received, duration=%.2f", movej_duration_);
@@ -436,6 +438,7 @@ bool AIWorkerMoveLController::startHomeMotion()
   movej_duration_ = 5.0;
   movej_start_time_ = this->now();
   movej_active_ = true;
+  movej_goal_published_ = false;
   idle_hold_published_ = false;
   require_new_movel_goal_ = true;
   return true;
@@ -488,6 +491,7 @@ bool AIWorkerMoveLController::startArmPrepareMotion()
   movej_duration_ = 7.0;
   movej_start_time_ = this->now();
   movej_active_ = true;
+  movej_goal_published_ = false;
   idle_hold_published_ = false;
   require_new_movel_goal_ = true;
   return true;
@@ -547,14 +551,16 @@ void AIWorkerMoveLController::controlLoopCallback()
     return;
   }
 
-  // MoveJ bypass: start → target 보간 후 publish (movej_duration_ 동안 천천히 이동)
+  // MoveJ is sent once with the requested duration; the trajectory controller handles timing.
   if (movej_active_) {
     const double elapsed = (this->now() - movej_start_time_).seconds();
-    const double alpha = std::min(1.0, elapsed / movej_duration_);
-    const Eigen::VectorXd q_interp = q_movej_start_ + alpha * (q_movej_target_ - q_movej_start_);
-    publishTrajectory(q_interp);
+    if (!movej_goal_published_) {
+      publishTrajectory(q_movej_target_, movej_duration_);
+      movej_goal_published_ = true;
+    }
     if (elapsed >= movej_duration_) {
       movej_active_ = false;
+      movej_goal_published_ = false;
       q_desired_ = q_movej_target_;
       kinematics_solver_->updateState(q_desired_, qdot_);
       right_movel_goal_pose_ = kinematics_solver_->getPose(r_gripper_name_);
@@ -763,8 +769,11 @@ void AIWorkerMoveLController::syncArmStateToFeedback(
   }
 }
 
-void AIWorkerMoveLController::publishTrajectory(const Eigen::VectorXd & q_desired)
+void AIWorkerMoveLController::publishTrajectory(
+  const Eigen::VectorXd & q_desired,
+  double trajectory_time)
 {
+  const double point_time = trajectory_time > 0.0 ? trajectory_time : trajectory_time_;
   std::vector<int> left_arm_indices;
   std::vector<int> right_arm_indices;
 
@@ -785,19 +794,19 @@ void AIWorkerMoveLController::publishTrajectory(const Eigen::VectorXd & q_desire
   if (!left_arm_indices.empty()) {
     arm_l_pub_->publish(createArmTrajectoryMsg(
       left_arm_joints_, q_desired, left_arm_indices,
-      left_gripper_joint_name_, left_gripper_position_));
+      left_gripper_joint_name_, left_gripper_position_, point_time));
   }
 
   if (!right_arm_indices.empty()) {
     arm_r_pub_->publish(createArmTrajectoryMsg(
       right_arm_joints_, q_desired, right_arm_indices,
-      right_gripper_joint_name_, right_gripper_position_));
+      right_gripper_joint_name_, right_gripper_position_, point_time));
   }
 
   if (lift_joint_index_ >= 0 && !lift_joint_.empty() && lift_vel_bound_ != 0.0 &&
     lift_joint_index_ < q_desired.size())
   {
-    lift_pub_->publish(createLiftTrajectoryMsg(lift_joint_, q_desired[lift_joint_index_]));
+    lift_pub_->publish(createLiftTrajectoryMsg(lift_joint_, q_desired[lift_joint_index_], point_time));
   }
 }
 
@@ -806,7 +815,8 @@ trajectory_msgs::msg::JointTrajectory AIWorkerMoveLController::createArmTrajecto
   const Eigen::VectorXd & positions,
   const std::vector<int> & arm_indices,
   const std::string & gripper_joint_name,
-  double gripper_position) const
+  double gripper_position,
+  double trajectory_time) const
 {
   trajectory_msgs::msg::JointTrajectory traj_msg;
   traj_msg.header.frame_id = "";
@@ -814,7 +824,7 @@ trajectory_msgs::msg::JointTrajectory AIWorkerMoveLController::createArmTrajecto
   traj_msg.joint_names.push_back(gripper_joint_name);
 
   trajectory_msgs::msg::JointTrajectoryPoint point;
-  point.time_from_start = rclcpp::Duration::from_seconds(trajectory_time_);
+  point.time_from_start = rclcpp::Duration::from_seconds(trajectory_time);
   for (int idx : arm_indices) {
     if (idx >= 0 && idx < static_cast<int>(positions.size())) {
       point.positions.push_back(positions[idx]);
@@ -827,14 +837,15 @@ trajectory_msgs::msg::JointTrajectory AIWorkerMoveLController::createArmTrajecto
 
 trajectory_msgs::msg::JointTrajectory AIWorkerMoveLController::createLiftTrajectoryMsg(
   std::string lift_joint_name,
-  const double position) const
+  const double position,
+  double trajectory_time) const
 {
   trajectory_msgs::msg::JointTrajectory traj_msg;
   traj_msg.header.frame_id = "";
   traj_msg.joint_names = {lift_joint_name};
 
   trajectory_msgs::msg::JointTrajectoryPoint point;
-  point.time_from_start = rclcpp::Duration::from_seconds(trajectory_time_);
+  point.time_from_start = rclcpp::Duration::from_seconds(trajectory_time);
   point.positions = {position};
   traj_msg.points.push_back(point);
   return traj_msg;

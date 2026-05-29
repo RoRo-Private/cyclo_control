@@ -122,6 +122,7 @@ private:
   bool require_new_movel_goal_ = false;
   bool joint_state_timeout_active_ = false;
   bool startup_motion_started_ = false;
+  bool movej_goal_published_ = false;
 
   rclcpp::Time right_motion_start_time_;
   rclcpp::Time left_motion_start_time_;
@@ -159,16 +160,18 @@ private:
   void initializeJointConfig();
   bool startHomeMotion();
   bool startArmPrepareMotion();
-  void publishTrajectory(const Eigen::VectorXd & q_desired);
+  void publishTrajectory(const Eigen::VectorXd & q_desired, double trajectory_time = -1.0);
   trajectory_msgs::msg::JointTrajectory createArmTrajectoryMsg(
     const std::vector<std::string> & arm_joint_names,
     const Eigen::VectorXd & positions,
     const std::vector<int> & arm_indices,
     const std::string & gripper_joint_name,
-    double gripper_position) const;
+    double gripper_position,
+    double trajectory_time) const;
   trajectory_msgs::msg::JointTrajectory createLiftTrajectoryMsg(
     std::string lift_joint_name,
-    const double position) const;
+    const double position,
+    double trajectory_time) const;
   void publishGripperPose(
     const Eigen::Affine3d & r_gripper_pose,
     const Eigen::Affine3d & l_gripper_pose);
