@@ -250,6 +250,7 @@ void AIWorkerMoveLController::jointStateCallback(const sensor_msgs::msg::JointSt
     right_movel_target_initialized_ = true;
     left_movel_target_initialized_ = true;
     idle_hold_published_ = false;
+    RCLCPP_INFO(this->get_logger(), "Command state synced to feedback. Initial hold pending.");
     return;
   }
 }
@@ -500,6 +501,7 @@ void AIWorkerMoveLController::controlLoopCallback()
         if (!idle_hold_published_) {
           publishTrajectory(q_desired_);
           idle_hold_published_ = true;
+          RCLCPP_INFO(this->get_logger(), "Initial idle hold trajectory published.");
         }
         return;
       }
