@@ -477,6 +477,10 @@ void AIWorkerMoveLController::controlLoopCallback()
       return;
     }
 
+    if (!right_movel_trajectory_active_ && !left_movel_trajectory_active_) {
+      return;
+    }
+
     const double right_elapsed = (this->now() - right_motion_start_time_).seconds();
     const double left_elapsed = (this->now() - left_motion_start_time_).seconds();
 
