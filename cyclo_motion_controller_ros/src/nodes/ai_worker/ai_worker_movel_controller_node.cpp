@@ -81,6 +81,7 @@ AIWorkerMoveLController::AIWorkerMoveLController()
       std::string("gripper_r_joint1"));
   left_gripper_joint_name_ = this->declare_parameter("left_gripper_joint",
       std::string("gripper_l_joint1"));
+  startup_motion_ = this->declare_parameter("startup_motion", std::string("none"));
 
   right_movel_sub_ = this->create_subscription<robotis_interfaces::msg::MoveL>(
     right_movel_topic_, 10,
@@ -254,6 +255,23 @@ void AIWorkerMoveLController::jointStateCallback(const sensor_msgs::msg::JointSt
     left_movel_target_initialized_ = true;
     idle_hold_published_ = false;
     RCLCPP_INFO(this->get_logger(), "Command state synced to feedback. Initial hold pending.");
+    if (!startup_motion_started_) {
+      startup_motion_started_ = true;
+      if (startup_motion_ == "home") {
+        if (startHomeMotion()) {
+          RCLCPP_INFO(this->get_logger(), "Startup motion requested: home");
+        }
+      } else if (startup_motion_ == "arm_prepare") {
+        if (startArmPrepareMotion()) {
+          RCLCPP_INFO(this->get_logger(), "Startup motion requested: arm_prepare");
+        }
+      } else if (startup_motion_ != "none") {
+        RCLCPP_WARN(
+          this->get_logger(),
+          "Unknown startup_motion '%s'. Use 'none', 'home', or 'arm_prepare'.",
+          startup_motion_.c_str());
+      }
+    }
     return;
   }
 }
@@ -377,6 +395,14 @@ void AIWorkerMoveLController::inputHomeCallback(
   }
 
   RCLCPP_INFO(this->get_logger(), "HOME TRIGGER RECEIVED");
+  startHomeMotion();
+}
+
+bool AIWorkerMoveLController::startHomeMotion()
+{
+  if (!q_desired_initialized_) {
+    return false;
+  }
 
   q_movej_start_ = q_desired_;
   q_movej_target_ = q_desired_;
@@ -412,6 +438,7 @@ void AIWorkerMoveLController::inputHomeCallback(
   movej_active_ = true;
   idle_hold_published_ = false;
   require_new_movel_goal_ = true;
+  return true;
 }
 
 void AIWorkerMoveLController::armPrepareCallback(
@@ -422,6 +449,14 @@ void AIWorkerMoveLController::armPrepareCallback(
   }
 
   RCLCPP_INFO(this->get_logger(), "ARM PREPARE TRIGGER RECEIVED");
+  startArmPrepareMotion();
+}
+
+bool AIWorkerMoveLController::startArmPrepareMotion()
+{
+  if (!q_desired_initialized_) {
+    return false;
+  }
 
   q_movej_start_ = q_desired_;
   q_movej_target_ = q_desired_;
@@ -455,6 +490,7 @@ void AIWorkerMoveLController::armPrepareCallback(
   movej_active_ = true;
   idle_hold_published_ = false;
   require_new_movel_goal_ = true;
+  return true;
 }
 
 Eigen::Affine3d AIWorkerMoveLController::poseMsgToEigen(

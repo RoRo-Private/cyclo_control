@@ -145,6 +145,11 @@ def generate_launch_description():
             description='Controller type (movel, movej, leader, vr). Default: movel.',
         ),
         DeclareLaunchArgument(
+            'startup_motion',
+            default_value='none',
+            description='Startup MoveJ for movel controller: none, home, or arm_prepare.',
+        ),
+        DeclareLaunchArgument(
             'arm',
             default_value='true',
             description='Whether to run arm retargeting node. Default: true.',
@@ -171,6 +176,7 @@ def generate_launch_description():
     left_movel_topic = LaunchConfiguration('left_movel_topic')
     config_file = LaunchConfiguration('config_file')
     controller_type = LaunchConfiguration('controller_type')
+    startup_motion = LaunchConfiguration('startup_motion')
     arm = LaunchConfiguration('arm')
     hand = LaunchConfiguration('hand')
     follower_srdf_path = PythonExpression(
@@ -192,6 +198,7 @@ def generate_launch_description():
             {
                 'urdf_path': follower_urdf_path,
                 'srdf_path': follower_srdf_path,
+                'startup_motion': startup_motion,
             },
         ],
         output='screen',

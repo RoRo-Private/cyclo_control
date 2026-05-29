@@ -77,6 +77,7 @@ private:
   std::string l_gripper_name_;
   std::string right_gripper_joint_name_;
   std::string left_gripper_joint_name_;
+  std::string startup_motion_;
   std::string urdf_path_;
   std::string srdf_path_;
 
@@ -120,6 +121,7 @@ private:
   bool idle_hold_published_ = false;
   bool require_new_movel_goal_ = false;
   bool joint_state_timeout_active_ = false;
+  bool startup_motion_started_ = false;
 
   rclcpp::Time right_motion_start_time_;
   rclcpp::Time left_motion_start_time_;
@@ -155,6 +157,8 @@ private:
   void controlLoopCallback();
 
   void initializeJointConfig();
+  bool startHomeMotion();
+  bool startArmPrepareMotion();
   void publishTrajectory(const Eigen::VectorXd & q_desired);
   trajectory_msgs::msg::JointTrajectory createArmTrajectoryMsg(
     const std::vector<std::string> & arm_joint_names,
