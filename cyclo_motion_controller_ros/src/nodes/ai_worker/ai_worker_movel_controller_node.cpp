@@ -249,6 +249,7 @@ void AIWorkerMoveLController::jointStateCallback(const sensor_msgs::msg::JointSt
     q_desired_initialized_ = true;
     right_movel_target_initialized_ = true;
     left_movel_target_initialized_ = true;
+    idle_hold_published_ = false;
     return;
   }
 }
@@ -271,6 +272,7 @@ void AIWorkerMoveLController::rightMoveLCallback(
   right_motion_start_time_ = this->now();
   right_movel_target_initialized_ = true;
   right_movel_trajectory_active_ = right_active_motion_duration_ > -1.0;
+  idle_hold_published_ = false;
 }
 
 void AIWorkerMoveLController::leftMoveLCallback(const robotis_interfaces::msg::MoveL::SharedPtr msg)
@@ -290,6 +292,7 @@ void AIWorkerMoveLController::leftMoveLCallback(const robotis_interfaces::msg::M
   left_motion_start_time_ = this->now();
   left_movel_target_initialized_ = true;
   left_movel_trajectory_active_ = left_active_motion_duration_ > -1.0;
+  idle_hold_published_ = false;
 }
 
 void AIWorkerMoveLController::leftMoveJCallback(
@@ -315,6 +318,7 @@ void AIWorkerMoveLController::leftMoveJCallback(
   }
   movej_start_time_ = this->now();
   movej_active_ = true;
+  idle_hold_published_ = false;
   RCLCPP_INFO(this->get_logger(), "MoveJ left received, duration=%.2f", movej_duration_);
 }
 
@@ -341,6 +345,7 @@ void AIWorkerMoveLController::rightMoveJCallback(
   }
   movej_start_time_ = this->now();
   movej_active_ = true;
+  idle_hold_published_ = false;
   RCLCPP_INFO(this->get_logger(), "MoveJ right received, duration=%.2f", movej_duration_);
 }
 
@@ -385,6 +390,7 @@ void AIWorkerMoveLController::inputHomeCallback(
   movej_duration_ = 5.0;
   movej_start_time_ = this->now();
   movej_active_ = true;
+  idle_hold_published_ = false;
 }
 
 Eigen::Affine3d AIWorkerMoveLController::poseMsgToEigen(
@@ -478,7 +484,25 @@ void AIWorkerMoveLController::controlLoopCallback()
     }
 
     if (!right_movel_trajectory_active_ && !left_movel_trajectory_active_) {
-      return;
+      const auto pose_error_small = [](const Eigen::Affine3d & current_pose,
+          const Eigen::Affine3d & goal_pose) {
+          const double position_error =
+          (goal_pose.translation() - current_pose.translation()).norm();
+          const Eigen::Matrix3d rotation_error =
+          goal_pose.linear() * current_pose.linear().transpose();
+          const double orientation_error = Eigen::AngleAxisd(rotation_error).angle();
+          return position_error < 0.005 && orientation_error < 0.03;
+        };
+
+      if (pose_error_small(right_gripper_pose_, right_movel_goal_pose_) &&
+        pose_error_small(left_gripper_pose_, left_movel_goal_pose_))
+      {
+        if (!idle_hold_published_) {
+          publishTrajectory(q_desired_);
+          idle_hold_published_ = true;
+        }
+        return;
+      }
     }
 
     const double right_elapsed = (this->now() - right_motion_start_time_).seconds();

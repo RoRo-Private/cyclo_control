@@ -116,6 +116,7 @@ private:
   bool left_movel_target_initialized_;
   bool right_movel_trajectory_active_;
   bool left_movel_trajectory_active_;
+  bool idle_hold_published_ = false;
   bool joint_state_timeout_active_ = false;
 
   rclcpp::Time right_motion_start_time_;
